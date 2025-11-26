@@ -123,4 +123,17 @@ pipeline {
             echo "Cleanup complete!"
         }
     }
+} 
+
+post {
+    always {
+        echo " Nettoyage des images Docker non utilisées…"
+
+        bat """
+        docker system prune -af
+        """
+
+        echo " Nettoyage terminé."
+    }
 }
+
