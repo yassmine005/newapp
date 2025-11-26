@@ -1,35 +1,57 @@
 def dockerImageServer
 def dockerImageClient
+def SERVER_CHANGED = false
+def CLIENT_CHANGED = false
 
 pipeline {
     agent any
 
     triggers {
-        // Vérifie le repo toutes les 5 minutes
         pollSCM('H/5 * * * *')
     }
 
     environment {
-        // ID des credentials Docker Hub (Jenkins > Credentials)
         DOCKERHUB_CREDENTIALS_ID = '12905163'
 
-        // Noms des images Docker Hub
         IMAGE_NAME_SERVER = 'yassminemahmoud/mern-server'
         IMAGE_NAME_CLIENT = 'yassminemahmoud/mern-client'
     }
 
     stages {
-        stage('Checkout') {
+
+        stage('Detect Changes') {
             steps {
-                checkout scm
+                script {
+                    def changeLogSets = currentBuild.changeSets
+
+                    for (change in changeLogSets) {
+                        for (entry in change.items) {
+                            for (file in entry.affectedFiles) {
+                                def path = file.path
+
+                                if (path.startsWith("server/")) {
+                                    SERVER_CHANGED = true
+                                }
+                                if (path.startsWith("client/")) {
+                                    CLIENT_CHANGED = true
+                                }
+                            }
+                        }
+                    }
+
+                    echo "Server changed: ${SERVER_CHANGED}"
+                    echo "Client changed: ${CLIENT_CHANGED}"
+                }
             }
         }
 
         stage('Build Server Image') {
+            when {
+                expression { SERVER_CHANGED }
+            }
             steps {
                 dir('server') {
                     script {
-                        // Tag "latest" 
                         dockerImageServer = docker.build("${IMAGE_NAME_SERVER}:latest")
                     }
                 }
@@ -37,6 +59,9 @@ pipeline {
         }
 
         stage('Build Client Image') {
+            when {
+                expression { CLIENT_CHANGED }
+            }
             steps {
                 dir('client') {
                     script {
@@ -47,6 +72,9 @@ pipeline {
         }
 
         stage('Scan Server Image') {
+            when {
+                expression { SERVER_CHANGED }
+            }
             steps {
                 script {
                     bat """
@@ -57,6 +85,9 @@ pipeline {
         }
 
         stage('Scan Client Image') {
+            when {
+                expression { CLIENT_CHANGED }
+            }
             steps {
                 script {
                     bat """
@@ -67,14 +98,29 @@ pipeline {
         }
 
         stage('Push Images to Docker Hub') {
+            when {
+                expression { SERVER_CHANGED || CLIENT_CHANGED }
+            }
             steps {
                 script {
                     docker.withRegistry('', DOCKERHUB_CREDENTIALS_ID) {
-                        dockerImageServer.push('latest')
-                        dockerImageClient.push('latest')
+                        if (SERVER_CHANGED) dockerImageServer.push('latest')
+                        if (CLIENT_CHANGED) dockerImageClient.push('latest')
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo "Cleaning unused Docker images…"
+
+            bat """
+            docker system prune -af
+            """
+
+            echo "Cleanup complete!"
         }
     }
 }
