@@ -1,7 +1,5 @@
 def dockerImageServer
 def dockerImageClient
-def SERVER_CHANGED = false
-def CLIENT_CHANGED = false
 
 pipeline {
     agent any
@@ -19,35 +17,40 @@ pipeline {
 
     stages {
 
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Detect Changes') {
             steps {
                 script {
-                    def changeLogSets = currentBuild.changeSets
+                    echo "Vérification des changements..."
 
-                    for (change in changeLogSets) {
-                        for (entry in change.items) {
-                            for (file in entry.affectedFiles) {
-                                def path = file.path
+                    hasServerChanges = (
+                        bat(
+                            script: "git diff --name-only HEAD~1 HEAD | findstr /R \"^server/\"",
+                            returnStatus: true
+                        ) == 0
+                    )
 
-                                if (path.startsWith("server/")) {
-                                    SERVER_CHANGED = true
-                                }
-                                if (path.startsWith("client/")) {
-                                    CLIENT_CHANGED = true
-                                }
-                            }
-                        }
-                    }
+                    hasClientChanges = (
+                        bat(
+                            script: "git diff --name-only HEAD~1 HEAD | findstr /R \"^client/\"",
+                            returnStatus: true
+                        ) == 0
+                    )
 
-                    echo "Server changed: ${SERVER_CHANGED}"
-                    echo "Client changed: ${CLIENT_CHANGED}"
+                    echo "➡ Changement Server : ${hasServerChanges}"
+                    echo "➡ Changement Client : ${hasClientChanges}"
                 }
             }
         }
 
         stage('Build Server Image') {
             when {
-                expression { SERVER_CHANGED }
+                expression { return hasServerChanges }
             }
             steps {
                 dir('server') {
@@ -60,7 +63,7 @@ pipeline {
 
         stage('Build Client Image') {
             when {
-                expression { CLIENT_CHANGED }
+                expression { return hasClientChanges }
             }
             steps {
                 dir('client') {
@@ -73,67 +76,6 @@ pipeline {
 
         stage('Scan Server Image') {
             when {
-                expression { SERVER_CHANGED }
+                expression { return hasServerChanges }
             }
             steps {
-                script {
-                    bat """
-                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --exit-code 0 --severity LOW,MEDIUM,HIGH,CRITICAL ${IMAGE_NAME_SERVER}:latest
-                    """
-                }
-            }
-        }
-
-        stage('Scan Client Image') {
-            when {
-                expression { CLIENT_CHANGED }
-            }
-            steps {
-                script {
-                    bat """
-                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --exit-code 0 --severity LOW,MEDIUM,HIGH,CRITICAL ${IMAGE_NAME_CLIENT}:latest
-                    """
-                }
-            }
-        }
-
-        stage('Push Images to Docker Hub') {
-            when {
-                expression { SERVER_CHANGED || CLIENT_CHANGED }
-            }
-            steps {
-                script {
-                    docker.withRegistry('', DOCKERHUB_CREDENTIALS_ID) {
-                        if (SERVER_CHANGED) dockerImageServer.push('latest')
-                        if (CLIENT_CHANGED) dockerImageClient.push('latest')
-                    }
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            echo "Cleaning unused Docker images…"
-
-            bat """
-            docker system prune -af
-            """
-
-            echo "Cleanup complete!"
-        }
-    }
-} 
-
-post {
-    always {
-        echo " Nettoyage des images Docker non utilisées…"
-
-        bat """
-        docker system prune -af
-        """
-
-        echo " Nettoyage terminé."
-    }
-}
-
