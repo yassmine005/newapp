@@ -1,5 +1,7 @@
 def dockerImageServer
 def dockerImageClient
+def hasServerChanges = false
+def hasClientChanges = false
 
 pipeline {
     agent any
@@ -56,26 +58,4 @@ pipeline {
                 dir('server') {
                     script {
                         dockerImageServer = docker.build("${IMAGE_NAME_SERVER}:latest")
-                    }
-                }
-            }
-        }
 
-        stage('Build Client Image') {
-            when {
-                expression { return hasClientChanges }
-            }
-            steps {
-                dir('client') {
-                    script {
-                        dockerImageClient = docker.build("${IMAGE_NAME_CLIENT}:latest")
-                    }
-                }
-            }
-        }
-
-        stage('Scan Server Image') {
-            when {
-                expression { return hasServerChanges }
-            }
-            steps {
